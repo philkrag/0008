@@ -1,4 +1,3 @@
-
 /*
 // /////////////////////////////////////////////////////////////////////// COPYRIGHT NOTICE
 // This program is free software: you can redistribute it and/or modify
@@ -17,78 +16,130 @@
 // PAGE CREATED DATE: 2019-07-20
 // DATE       || NAME           || MODIFICATION
 // 2019-10-24   || Phillip Kraguljac    || Created.
+// 2019-09-25   || Phillip Kraguljac    || Version 1.1
 // /////////////////////////////////////////////////////////////////////// VERSION CONTROL
 */
 
-int counter = 0;
-volatile int Main_Measurement = 0;
-volatile bool Step_Recorded = false;
-bool Rotating_Forward = true;
-int Encoder_A_Terminal = 2; 
-int Encoder_B_Terminal = 3;
+#include <LiquidCrystal.h>
+
+// /////////////////////////////////////////////////////////////////////// USER DEFINABLE VARIABLES
+int Startup_Delay = 60;                                                             // Cycle time allocated for start-up.
+int Measuring_Delay = 100;                                                          // Time allowed for unit to settle in position.
+int Calculating_Delay = 400;                                                        // Cycle time allocated for start-up.
+int Override_Switch = 53;                                                           // IO Input address.
 
 
-volatile byte Encoder_A_Value = 0;
-volatile byte Encoder_B_Value = 0;
-volatile byte Encoder_A_Value_Memory = 0;
-volatile byte Encoder_B_Value_Memory = 0;
+// /////////////////////////////////////////////////////////////////////// SYSTEM VARIABLES
+const int rs = 8, en = 9, d4 = 4, d5 = 5, d6 = 6, d7 = 7;                           // Required for LCD.
+LiquidCrystal lcd(rs, en, d4, d5, d6, d7);                                          // Required for LCD.
+bool Override_Flag = false;                                                         // Flag used for triggering system override.
+int Mode_Time_Indexer = 0;                                                          // Index used for mode cycle timers.
+String Mode = "START-UP";                                                           // Mode Indexer.
+String Upper_LCD_Line = "";                                                         // LCD upper output string.
+String Lower_LCD_Line = "";                                                         // LCD lower output string.
+bool Flash_Fast_Flag = false;                                                       // ...
+int Flash_Indexer = 0;                                                              // ...
+int Flash_Fast_Cycles = 20;                                                         // ...
+int Main_Measurement = 0;                                                           // ...
+int Encoder_A_Terminal = 18;                                                        // ...
+int Encoder_B_Terminal = 19;                                                        // ...
+bool Encoder_A_Value = 0;                                                           // ...
+bool Encoder_B_Value = 0;                                                           // ...
 
 
 void setup() {
+Serial.begin (9600);                                                                // Start serial @ BAUD.
+lcd.begin(16, 2);                                                                   // Set cursor for LCD screen output.
+lcd.clear();                                                                        // Reset LCD screen.
+pinMode(Encoder_A_Terminal, INPUT);                                                 // Declare IO's.
+pinMode(Encoder_B_Terminal, INPUT);                                                 // Declare IO's.
+attachInterrupt(digitalPinToInterrupt(Encoder_A_Terminal), Input_Change_Detected, HIGH);      //Interrupt trigger mode: RISING
+}                                                                                   // ...
 
-Serial.begin (9600);
-pinMode(Encoder_A_Terminal, INPUT);                                                  // Declare IO's.
-pinMode(Encoder_B_Terminal, INPUT);                                                  // Declare IO's.
-//pinMode(Encoder_2A_Terminal, INPUT_PULLUP);                                                  // Declare IO's.
-//pinMode(Encoder_2B_Terminal, INPUT);                                                  // Declare IO's.
-
-//attachInterrupt(digitalPinToInterrupt(Encoder_A_Terminal), Input_Change_Detected, CHANGE); //Interrupt trigger mode: RISING
-attachInterrupt(digitalPinToInterrupt(Encoder_B_Terminal), Input_Change_Detected, CHANGE); //Interrupt trigger mode: RISING
-}
 
 void loop() {
-  
-counter++;
-Serial.print(String(counter)+" - ");
-Serial.print("A:"+String(Encoder_A_Value_Memory)+" - ");
-Serial.print("B:"+String(Encoder_B_Value_Memory)+" - ");
-Serial.print("D:"+String(Rotating_Forward)+" - ");
-Serial.print("S:"+String(Step_Recorded)+" - ");
-Serial.println("M:"+String(Main_Measurement));
-
-//delay(100);
-
-}
+//Override_Flag = digitalRead(Override_Switch);                                     // Removed for this application.
+Flash_Operation();                                                                  // ...
 
 
+// /////////////////////////////////////////////////////////////////////// MODE(S)
+
+// [MODE] => "START-UP"
+if(Mode=="START-UP"){                                                               // Start-up mode in operation.
+if(Override_Flag){Mode = "OVERRIDE"; Mode_Restart();}                               // Go to override if switched.
+Mode_Time_Indexer = Mode_Time_Indexer + 1;                                          // Increment mode counter.
+Upper_LCD_Line = "Mode: "+Mode;                                                     // Set upper LCD line.
+Lower_LCD_Line = Progress_Bar(Startup_Delay, Mode_Time_Indexer);                    // Set lower LCD Line.
+General_LCD_Output(Upper_LCD_Line, Lower_LCD_Line);                                 // Display LCD.
+if(Mode_Time_Indexer > Startup_Delay){Mode = "DISPLAY"; Mode_Restart();}            // Switch mode once complete.
+}                                                                                   // ...
 
 
+// [MODE] => "DISPLAY"
+if(Mode=="DISPLAY"){                                                                // Start-up mode in operation.
+if(Override_Flag){Mode = "OVERRIDE"; Mode_Restart();}                               // Go to override if switched.
+Upper_LCD_Line = "Mode: "+Mode;                                                     // Set upper LCD line.
+Lower_LCD_Line = Progress_Bar(Startup_Delay, Mode_Time_Indexer);                    // Set lower LCD Line.
+Lower_LCD_Line = "=> "+String(Main_Measurement*0.541)+"mm        ";                 // Set lower LCD Line.
+General_LCD_Output(Upper_LCD_Line, Lower_LCD_Line);                                 // Display LCD.
+}                                                                                   // ...
+}                                                                                   // ...
+
+// ///////////////////////////////////////////////////////////////// FUNCTION(S)
 
 
+// [FUNCTION] => FLASH FUNCTIONS
+void Flash_Operation(){                                                             // ...
+if(Flash_Indexer < Flash_Fast_Cycles){Flash_Indexer=Flash_Indexer+1;}               // ...
+if(Flash_Indexer >= Flash_Fast_Cycles){                                             // ...
+Flash_Indexer = 0;                                                                  // ...
+if(Flash_Fast_Flag == true){Flash_Fast_Flag = false;}else{Flash_Fast_Flag = true;}  // ...
+}                                                                                   // ...
+}                                                                                   // ...
 
 
+// [FUNCTION] => CREATE AND RETURN PROGRESS BAR STRING
+String Progress_Bar(int Set_Value, int Counter){                                    // ...
+String Output_String = "";                                                          // Declare return variable.
+long Available_Segments = 16;                                                       // Determine LCD width segments / spaces.
+float Real_Progress_Ratio = float(Counter) / float(Set_Value);                      // Determine progress variables.
+int Artificial_Progress = int(Real_Progress_Ratio*Available_Segments);              // Determine dispaly value.
+for (int i = 0; i < Artificial_Progress; i++){                                      // Cycle through segment loop.
+Output_String += ".";                                                               // Add bar segments -> load ratio.
+}                                                                                   // ...
+return Output_String;                                                               // Return functional variable.
+}                                                                                   // ...
 
-void Input_Change_Detected(){
-Encoder_A_Value = digitalRead(Encoder_A_Terminal);
-Encoder_B_Value = digitalRead(Encoder_B_Terminal);
-Determine_Direction();
-Encoder_A_Value_Memory = Encoder_A_Value;
-Encoder_B_Value_Memory = Encoder_B_Value;
+
+// [FUNCTION] => General Serial Output                                              // ...
+void General_Serial_Output(String Message){                                         // ...
+//Serial1.println(Message);                                                         // ...
+}                                                                                   // ...
 
 
+// [FUNCTION] => General LCD Output
+void General_LCD_Output(String Upper_LCD_Line, String Lower_LCD_Line){              // ...
+//lcd.clear();                                                                      // ...
+lcd.setCursor(0, 0);                                                                // Set LCD cursor.
+lcd.print(Upper_LCD_Line);                                                          // ...
+lcd.setCursor(0, 1);                                                                // Set LCD cursor.
+lcd.print(Lower_LCD_Line);                                                          // ...
+}                                                                                   // ...
 
 
-}
+// [FUNCTION] => Actions On Detecting Movement
+void Input_Change_Detected(){                                                       // ...
+Encoder_A_Value = digitalRead(Encoder_A_Terminal);                                  // ...
+Encoder_B_Value = digitalRead(Encoder_B_Terminal);                                  // ...
+if(Encoder_A_Value==1){                                                             // ...
+if(Encoder_B_Value==0){Main_Measurement++;}                                         // ...
+if(Encoder_B_Value==1){Main_Measurement--;}                                         // ...
+}                                                                                   // ...
+}                                                                                   // ...
 
 
-void Determine_Direction(){
-if(Step_Recorded==false){
-if(Encoder_A_Value_Memory==0&&Encoder_B_Value_Memory==0){  
-if(Encoder_A_Value==1){Rotating_Forward=true; Main_Measurement++; Step_Recorded=true;}
-if(Encoder_B_Value==1){Rotating_Forward=false; Main_Measurement--; Step_Recorded=true;}
-}
-}
-if(Encoder_A_Value_Memory==0&&Encoder_B_Value_Memory==0){
-Step_Recorded = false;
-}  
-}
+// [FUNCTION] => Mode Restart
+void Mode_Restart(){                                                                // ...
+Mode_Time_Indexer = 0; // Reset mode indexer.                                       // ...
+lcd.clear();                                                                        // ...
+}                                                                                   // ...
